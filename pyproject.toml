@@ -1,0 +1,14 @@
+[project]
+name = "rigol-oscilloscope-control"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "build>=1.4.0",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.2",
+    "pandas>=3.0.0",
+    "pathlib>=1.0.1",
+    "pyvisa>=1.16.1",
+]
