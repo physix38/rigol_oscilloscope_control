@@ -101,7 +101,7 @@ class RigolMHO984_DataAcquisition:
             yor=self.scope.query('WAV:YOR?')
             yor=np.int64(yor)
             yinc=self.scope.query('WAV:YINC?')  
-            print(type(yinc))
+            
             yinc=np.float64(yinc)
             # 解析波形数据
             # 跳过头部信息（找到#字符）
@@ -302,6 +302,8 @@ def main():
             print("\n" + "=" * 50)
             print("数据采集完成！")
             print(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            scope_acq.scope.write('RUN')
+
         else:
             print("\n数据采集失败")
             

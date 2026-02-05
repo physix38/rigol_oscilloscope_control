@@ -8,5 +8,7 @@ wheels/
 file
 testdata
 processedtestdata
+topticafile
+
 # Virtual environments
 .venv
