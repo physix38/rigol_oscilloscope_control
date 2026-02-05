@@ -5,6 +5,19 @@ from datetime import datetime
 import time
 import os
 
+def bytes_to_hex_array(data: bytes) -> list:
+    """
+    将相邻两个字节组合为一个16位整数（小端序），返回整数列表。
+    如果字节数为奇数，最后一个字节将被忽略。
+    """
+    result = []
+    # 每次取两个字节，步长为2
+    for i in range(0, len(data) - 1, 2):
+        # 将两个字节组合为16位整数（低字节在前）
+        value = data[i] | (data[i + 1] << 8)
+        result.append(value)
+    return result
+
 class RigolMHO984_DataAcquisition:
     def __init__(self, visa_address='USB0::0x1AB1::0x0452::MHO9B280400571::INSTR'):
         """
@@ -83,9 +96,13 @@ class RigolMHO984_DataAcquisition:
             
             # 读取波形数据
             raw_data = self.scope.read_raw()
+            
+          
             yor=self.scope.query('WAV:YOR?')
-            hexyor=hex(int(yor))
+            yor=np.int64(yor)
             yinc=self.scope.query('WAV:YINC?')  
+            print(type(yinc))
+            yinc=np.float64(yinc)
             # 解析波形数据
             # 跳过头部信息（找到#字符）
             start_idx = raw_data.find(b'#')
@@ -99,8 +116,11 @@ class RigolMHO984_DataAcquisition:
             # 提取实际数据
             data_start = start_idx + 2 + header_length
             data_bytes = raw_data[data_start:data_start + data_length]
+            data_bytes = bytes_to_hex_array(data_bytes)
+            data_bytes =np.array(data_bytes)
             
-            
+            voltage_data = (data_bytes-data_bytes[0]+yor)*yinc
+           
             
             # 获取波形参数以进行缩放
             vdiv = float(self.scope.query(f'CHAN{channel}:SCALe?'))
@@ -117,13 +137,8 @@ class RigolMHO984_DataAcquisition:
             
             
 
-            # 将字节数据转换为数值数组
-            # SDS3000X HD系列使用16位有符号整数
-            data_array = np.frombuffer(data_bytes, dtype='<i2')
-            # 计算实际电压值
-            # SDS3000X HD的高分辨率模式数据为16位（65536点）
-            vertical_resolution = 65536
-            voltage_data = (data_array / vertical_resolution) * (vdiv * 8) *probe - offset
+          
+            
             
             # 计算时间轴
             num_points = len(voltage_data)

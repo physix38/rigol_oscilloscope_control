@@ -7,5 +7,6 @@ wheels/
 *.egg-info
 file
 testdata
+processedtestdata
 # Virtual environments
 .venv
