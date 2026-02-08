@@ -1,300 +1,243 @@
 import numpy as np
 import pandas as pd
+from scipy.signal import find_peaks, peak_widths
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, peak_widths, peak_prominences
-import argparse
-import sys
+from scipy.interpolate import interp1d
 
-def load_csv_data(file_path):
-    """加载CSV文件数据"""
+
+
+
+
+
+
+def find_peaks_in_csv(csv_file, x_col=0, y_col=1, 
+                      prominence=1, width=1, distance=1,
+                      height=None, wlen=None, rel_height=0.5,
+                      plot=False, title=None, x_label=None, y_label=None):
+    """
+    从CSV文件中读取数据并进行寻峰分析
+    
+    参数:
+    ----------
+    csv_file : str
+        CSV文件路径
+    x_col : int or str, 默认 0
+        X轴数据列索引或列名
+    y_col : int or str, 默认 1
+        Y轴数据列索引或列名
+    prominence : float, 默认 1
+        峰的最小突出度
+    width : float, 默认 1
+        峰的最小宽度（样本数）
+    distance : float, 默认 1
+        峰之间的最小距离（样本数）
+    height : float, 可选
+        峰的最小高度
+    wlen : int, 可选
+        计算突出度时的窗口长度
+    rel_height : float, 默认 0.5
+        计算半高全宽时的相对高度（0-1之间）
+    plot : bool, 默认 False
+        是否绘制寻峰结果图
+    title : str, 可选
+        图表标题
+    x_label : str, 可选
+        X轴标签
+    y_label : str, 可选
+        Y轴标签
+    
+    返回:
+    -------
+    peaks_df : pandas.DataFrame
+        包含峰位置、高度和半高全宽的数据框
+    """
+    
+
+
+    # 1. 读取CSV文件
+    # skiprows忽略前11行
     try:
-        df = pd.read_csv(file_path)
-        print(f"CSV文件列名: {df.columns.tolist()}")
-        return df
-    except FileNotFoundError:
-        print(f"错误: 文件 '{file_path}' 未找到")
-        sys.exit(1)
+        data = pd.read_csv(csv_file,skiprows=11, names=['x_col', 'y_col'])
     except Exception as e:
-        print(f"读取CSV文件时出错: {e}")
-        sys.exit(1)
-
-def find_peaks_analysis(x_data, y_data, **kwargs):
-    """
-    寻峰分析主函数
+        raise ValueError(f"无法读取CSV文件: {e}")
+    print(data.columns.tolist())
+    # 2. 提取X和Y数据
+    if isinstance(x_col, str):
+        x = data['x_col'].values
+    else:
+        x = data.iloc[:, x_col].values
     
-    参数:
-    x_data: x轴数据
-    y_data: y轴数据
-    **kwargs: 传递给find_peaks的参数
+    if isinstance(y_col, str):
+        y = data['y_col'].values
+    else:
+        y = data.iloc[:, y_col].values
+    y=y-y[0]
+    x=x*10000
+    # 3. 寻峰
+    peaks, properties = find_peaks(
+        y, 
+        prominence=prominence,
+        #width=width,
+        distance=distance,
+        #height=height,
+        #wlen=wlen
+    )
     
-    返回:
-    peaks: 峰的位置索引
-    properties: 峰的属性字典
-    """
-    # 默认参数
-    default_kwargs = {
-        'height': None,      # 最小峰高
-        'threshold': None,   # 阈值
-        'distance': 10,      # 峰之间的最小距离
-        'prominence': None,  # 最小突出度
-        'width': None,       # 最小宽度
-        'wlen': None         # 计算突出度和宽度的窗口长度
-    }
+    if len(peaks) == 0:
+        print("未找到符合条件的峰")
+        return pd.DataFrame()
     
-    # 更新默认参数
-    for key, value in kwargs.items():
-        if key in default_kwargs:
-            default_kwargs[key] = value
+    # 4. 计算峰的宽度（半高全宽）
+    widths, width_heights, left_ips, right_ips = peak_widths(
+        y, peaks, rel_height=rel_height
+    )
     
-    # 寻峰
-    peaks, properties = find_peaks(y_data, **default_kwargs)
-    
-    return peaks, properties
-
-def calculate_fwhm(x_data, y_data, peaks, properties, rel_height=0.5):
-    """
-    计算半高全宽(FWHM)
-    
-    参数:
-    x_data: x轴数据
-    y_data: y轴数据
-    peaks: 峰的位置索引
-    properties: 峰的属性
-    rel_height: 相对高度，默认为0.5（半高）
-    
-    返回:
-    fwhm_values: 每个峰的FWHM值
-    left_ips: 左交点索引
-    right_ips: 右交点索引
-    """
-    # 计算峰宽（在相对高度处）
-    width_results = peak_widths(y_data, peaks, rel_height=rel_height)
-    
-    # 获取宽度信息
-    widths = width_results[0]  # 宽度（以索引为单位）
-    width_heights = width_results[1]  # 宽度处的高度
-    left_ips = width_results[2]  # 左交点插值位置
-    right_ips = width_results[3]  # 右交点插值位置
-    
-    # 将索引转换为x坐标
-    fwhm_values = []
-    left_x = []
-    right_x = []
-    
-    for i, peak_idx in enumerate(peaks):
-        # 线性插值将索引位置转换为x坐标
-        if peak_idx < len(x_data) - 1:
-            # 计算FWHM对应的x坐标
-            left_idx = left_ips[i]
-            right_idx = right_ips[i]
-            
-            # 插值得到x坐标
-            if left_idx.is_integer():
-                left_x_val = x_data[int(left_idx)]
-            else:
-                idx_low = int(np.floor(left_idx))
-                idx_high = int(np.ceil(left_idx))
-                if idx_high < len(x_data):
-                    frac = left_idx - idx_low
-                    left_x_val = x_data[idx_low] * (1 - frac) + x_data[idx_high] * frac
-                else:
-                    left_x_val = x_data[idx_low]
-            
-            if right_idx.is_integer():
-                right_x_val = x_data[int(right_idx)]
-            else:
-                idx_low = int(np.floor(right_idx))
-                idx_high = int(np.ceil(right_idx))
-                if idx_high < len(x_data):
-                    frac = right_idx - idx_low
-                    right_x_val = x_data[idx_low] * (1 - frac) + x_data[idx_high] * frac
-                else:
-                    right_x_val = x_data[idx_low]
-            
-            fwhm = right_x_val - left_x_val
-        else:
-            fwhm = 0
-            left_x_val = x_data[peak_idx]
-            right_x_val = x_data[peak_idx]
-        
-        fwhm_values.append(fwhm)
-        left_x.append(left_x_val)
-        right_x.append(right_x_val)
-    
-    return fwhm_values, left_x, right_x
-
-def analyze_peaks(x_data, y_data, peaks, properties):
-    """
-    分析峰并返回详细信息
-    
-    返回:
-    DataFrame包含峰的详细信息
-    """
-    # 计算突出度
-    prominences = peak_prominences(y_data, peaks)[0]
-    
-    # 计算FWHM
-    fwhm_values, left_x, right_x = calculate_fwhm(x_data, y_data, peaks, properties)
-    
-    # 收集结果
+    # 5. 准备结果数据
     results = []
     for i, peak_idx in enumerate(peaks):
         peak_info = {
-            '峰序号': i + 1,
-            'x位置': x_data[peak_idx],
-            'y位置': y_data[peak_idx],
-            '索引位置': peak_idx,
-            '峰高': y_data[peak_idx],
-            '突出度': prominences[i],
-            '半高全宽(FWHM)': fwhm_values[i],
-            '左边界(x)': left_x[i],
-            '右边界(x)': right_x[i]
+            'peak_index': peak_idx,  # 在数组中的索引
+            'x_position*10000': x[peak_idx],  # X轴位置
+            'y_height': y[peak_idx],  # 峰高度
+            'fwhm': widths[i],  # 半高全宽（样本数）
+            'fwhm_x*10000': x[int(np.round(right_ips[i]))] - x[int(np.round(left_ips[i]))],  # X轴上的FWHM
+            'left_base': x[int(np.round(left_ips[i]))],  # 左半高点X坐标
+            'right_base': x[int(np.round(right_ips[i]))],  # 右半高点X坐标
+            'prominence': properties['prominences'][i] if 'prominences' in properties else np.nan,
+            'width': properties['widths'][i] if 'widths' in properties else np.nan
         }
         results.append(peak_info)
     
-    return pd.DataFrame(results)
-
-def plot_results(x_data, y_data, peaks, df_results, output_file=None):
-    """绘制结果图形"""
-    plt.figure(figsize=(12, 8))
+    peaks_df = pd.DataFrame(results)
     
-    # 绘制原始数据
-    plt.plot(x_data, y_data, 'b-', label='原始数据', linewidth=1, alpha=0.7)
-    
-    # 标记峰的位置
-    plt.plot(x_data[peaks], y_data[peaks], 'rx', markersize=10, label='检测到的峰')
-    
-    # 标记FWHM
-    for _, row in df_results.iterrows():
-        # 绘制半高线
-        half_height = row['y位置'] - row['突出度'] / 2
-        plt.hlines(half_height, row['左边界(x)'], row['右边界(x)'], 
-                  colors='g', linestyles='dashed', linewidth=1)
+    # 6. 可选：绘制结果
+    if plot:
+        plt.figure(figsize=(12, 6))
         
-        # 标记FWHM宽度
-        plt.plot([row['左边界(x)'], row['右边界(x)']], 
-                [half_height, half_height], 'go', markersize=5)
+        # 绘制原始数据
+        plt.plot(x, y, 'b-', label='原始数据', alpha=0.7, linewidth=1)
         
-        # 添加文本标签
-        plt.text(row['x位置'], row['y位置'] * 1.05, 
-                f"峰{int(row['峰序号'])}", ha='center', fontsize=9)
-        plt.text((row['左边界(x)'] + row['右边界(x)']) / 2, 
-                half_height * 0.95, 
-                f"FWHM={row['半高全宽(FWHM)']:.3f}", 
-                ha='center', fontsize=8, color='green')
+        # 标记峰的位置
+        plt.plot(x[peaks], y[peaks], 'rx', markersize=10, label='峰位置')
+        
+        # 绘制半高全宽
+        for i, peak_idx in enumerate(peaks):
+            # 绘制水平线表示半高
+            half_max = y[peak_idx] * rel_height
+            plt.hlines(half_max, 
+                      x[int(np.round(left_ips[i]))], 
+                      x[int(np.round(right_ips[i]))],
+                      colors='g', linestyles='--', linewidth=2)
+            
+            # 标记FWHM
+            plt.text(x[peak_idx], half_max, 
+                    f'FWHM={peaks_df["fwhm_x"].iloc[i]:.3f}',
+                    verticalalignment='bottom',
+                    horizontalalignment='center')
+        
+        # 图表装饰
+        plt.xlabel(x_label if x_label else 'X轴')
+        plt.ylabel(y_label if y_label else 'Y轴')
+        plt.title(title if title else '寻峰结果')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
     
-    plt.xlabel('X轴')
-    plt.ylabel('Y轴')
-    plt.title('寻峰分析结果')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    if output_file:
-        plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        print(f"图形已保存到: {output_file}")
-    
-    plt.show()
+    return peaks_df
 
-def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description='CSV文件寻峰分析工具')
-    parser.add_argument('input_file', help='输入CSV文件路径')
-    parser.add_argument('--x-col', default=0, help='X轴数据列名或索引（默认: 0）')
-    parser.add_argument('--y-col', default=1, help='Y轴数据列名或索引（默认: 1）')
-    parser.add_argument('--height', type=float, help='最小峰高阈值')
-    parser.add_argument('--distance', type=int, default=10, help='峰之间的最小距离（默认: 10）')
-    parser.add_argument('--prominence', type=float, help='最小突出度阈值')
-    parser.add_argument('--width', type=float, help='最小宽度阈值')
-    parser.add_argument('--output', help='输出CSV文件路径（默认: peaks_output.csv）')
-    parser.add_argument('--plot', action='store_true', help='显示结果图形')
-    parser.add_argument('--plot-output', help='图形输出文件路径')
-    
-    args = parser.parse_args()
-    
-    # 加载数据
-    df = load_csv_data(args.input_file)
-    
-    # 确定x和y数据列
-    try:
-        if isinstance(args.x_col, str) and args.x_col in df.columns:
-            x_data = df[args.x_col].values
-        else:
-            x_col_idx = int(args.x_col)
-            x_data = df.iloc[:, x_col_idx].values
-    except:
-        print(f"警告: 无法获取X轴数据，使用索引作为X轴")
-        x_data = np.arange(len(df))
-    
-    try:
-        if isinstance(args.y_col, str) and args.y_col in df.columns:
-            y_data = df[args.y_col].values
-        else:
-            y_col_idx = int(args.y_col)
-            y_data = df.iloc[:, y_col_idx].values
-    except:
-        print(f"错误: 无法获取Y轴数据")
-        sys.exit(1)
-    
-    print(f"数据加载完成: {len(x_data)} 个数据点")
-    
-    # 准备寻峰参数
-    peak_kwargs = {}
-    if args.height is not None:
-        peak_kwargs['height'] = args.height
-    if args.distance is not None:
-        peak_kwargs['distance'] = args.distance
-    if args.prominence is not None:
-        peak_kwargs['prominence'] = args.prominence
-    if args.width is not None:
-        peak_kwargs['width'] = args.width
-    
-    # 寻峰分析
-    print("正在执行寻峰分析...")
-    peaks, properties = find_peaks_analysis(x_data, y_data, **peak_kwargs)
-    
-    if len(peaks) == 0:
-        print("未检测到任何峰！")
-        print("尝试调整参数：--height, --distance, --prominence")
-        sys.exit(0)
-    
-    print(f"检测到 {len(peaks)} 个峰")
-    
-    # 分析峰的详细信息
-    df_results = analyze_peaks(x_data, y_data, peaks, properties)
-    
-    # 输出结果
-    output_file = args.output or 'peaks_output.csv'
-    df_results.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print(f"结果已保存到: {output_file}")
-    
-    # 显示结果表格
-    print("\n" + "="*80)
-    print("寻峰分析结果:")
-    print("="*80)
-    print(df_results.to_string(index=False))
-    
-    # 计算统计信息
-    print("\n" + "="*80)
-    print("统计信息:")
-    print("="*80)
-    print(f"峰数量: {len(peaks)}")
-    print(f"平均峰高: {df_results['峰高'].mean():.4f}")
-    print(f"平均FWHM: {df_results['半高全宽(FWHM)'].mean():.4f}")
-    print(f"最大峰高: {df_results['峰高'].max():.4f} (峰{df_results['峰高'].idxmax()+1})")
-    print(f"最小FWHM: {df_results['半高全宽(FWHM)'].min():.4f} (峰{df_results['半高全宽(FWHM)'].idxmin()+1})")
-    
-    # 绘制图形
-    if args.plot or args.plot_output:
-        plot_results(x_data, y_data, peaks, df_results, args.plot_output)
 
+def find_peaks_with_baseline(csv_file, x_col=0, y_col=1, 
+                            baseline_method='poly', poly_order=3,
+                            **kwargs):
+    """
+    带基线扣除的寻峰函数
+    
+    参数:
+    ----------
+    csv_file : str
+        CSV文件路径
+    x_col, y_col : 同find_peaks_in_csv
+    baseline_method : str
+        基线扣除方法: 'poly' (多项式拟合) 或 'rolling' (滚动中值)
+    poly_order : int
+        多项式拟合的阶数
+    **kwargs : 传递给find_peaks_in_csv的其他参数
+    
+    返回:
+    -------
+    peaks_df : pandas.DataFrame
+        寻峰结果
+    """
+    
+    # 读取数据
+    data = pd.read_csv(csv_file,skiprows=11, names=['x_col', 'y_col'])
+    print(data.columns.tolist())
+    if isinstance(x_col, str):
+        x = data['x_col'].values
+    else:
+        x = data.iloc[:, x_col].values
+    
+    if isinstance(y_col, str):
+        y = data['y_col'].values
+    else:
+        y = data.iloc[:, y_col].values
+    
+    # 基线扣除
+    if baseline_method == 'poly':
+        # 多项式拟合基线
+        coeffs = np.polyfit(x, y, poly_order)
+        baseline = np.polyval(coeffs, x)
+    elif baseline_method == 'rolling':
+        # 滚动中值作为基线
+        window = kwargs.get('window_size', len(x)//10)
+        baseline = pd.Series(y).rolling(window, center=True, min_periods=1).median().values
+    else:
+        baseline = np.zeros_like(y)
+    
+    # 扣除基线
+    y_corrected = y - baseline
+    
+    # 使用校正后的数据进行寻峰
+    temp_df = pd.DataFrame({'x': x, 'y_corrected': y_corrected})
+    temp_file = 'temp_peak_data.csv'
+    temp_df.to_csv(temp_file, index=False)
+    
+    try:
+        peaks_df = find_peaks_in_csv(
+            temp_file, 
+            x_col=0, 
+            y_col=1,
+            **kwargs
+        )
+    finally:
+        # 清理临时文件
+        import os
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+    
+    return peaks_df
+
+
+# 使用示例
 if __name__ == "__main__":
-    # 如果直接运行，检查是否安装了必要的库
-    try:
-        import scipy
-        import pandas
-        import matplotlib
-    except ImportError as e:
-        print(f"错误: 缺少必要的库。请安装: pip install numpy pandas scipy matplotlib")
-        sys.exit(1)
     
-    main()
+    
+    peaks_baseline = find_peaks_in_csv('./processedtestdata1/Scope_Data_Ch1_20260208_173228.csv',
+        x_col='x',
+        y_col='y',
+        distance=10000,
+        prominence=0.01,
+        
+        
+        plot=False,
+       
+        title='寻峰')
+        
+        
+    
+    print("寻峰结果:")
+    print(peaks_baseline.round(3))
+    
+    
+

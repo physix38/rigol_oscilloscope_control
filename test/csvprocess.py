@@ -134,4 +134,4 @@ def process_single_csv_file(input_file, output_file):
 # 使用示例
 if __name__ == "__main__":
     # 测试
-    process_csv_folder_remove_empty_rows("testdata","processedtestdata")
+    process_csv_folder_remove_empty_rows("testdata","processedtestdata1")

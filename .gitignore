@@ -9,6 +9,7 @@ file
 testdata
 processedtestdata
 topticafile
-
+processedtestdata1
+processedtestdata0
 # Virtual environments
 .venv
