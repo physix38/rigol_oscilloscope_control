@@ -218,6 +218,84 @@ def find_peaks_with_baseline(csv_file, x_col=0, y_col=1,
     
     return peaks_df
 
+def calculate_peak_differences_enhanced(df, prominence_col=8, position_col=2):
+    """
+    增强版：计算满足"小，大，小"模式的高峰与相邻小峰的位置差值
+    
+    参数:
+    df: pandas DataFrame，包含峰值分析结果
+    prominence_col: prominence列的索引
+    position_col: 位置列的索引
+    
+    返回:
+    dict: 包含以下键的字典
+        'differences': 位置差值列表，每个元素是(left_diff, right_diff)
+        'peak_indices': 高峰在DataFrame中的索引列表
+        'peak_positions': 高峰位置列表
+        'summary': 统计摘要
+    """
+    
+    # 检查输入
+    if not isinstance(df, pd.DataFrame):
+        raise ValueError("输入必须是pandas DataFrame")
+    
+    if len(df) < 3:
+        return {
+            'differences': [],
+            'peak_indices': [],
+            'peak_positions': [],
+            'summary': '数据点太少，无法找到峰值'
+        }
+    
+    # 获取相关列
+    prominence = df.iloc[:, prominence_col]
+    positions = df.iloc[:, position_col]
+    
+    differences = []
+    peak_indices = []
+    peak_positions = []
+    
+    # 寻找满足"小，大，小"模式的峰值
+    for i in range(1, len(prominence) - 1):
+        if (prominence.iloc[i-1] < prominence.iloc[i] and 
+            prominence.iloc[i] > prominence.iloc[i+1]):
+            
+            left_diff = positions.iloc[i] - positions.iloc[i-1]
+            right_diff = positions.iloc[i+1] - positions.iloc[i]
+            
+            differences.append((left_diff, right_diff))
+            peak_indices.append(i)
+            peak_positions.append(positions.iloc[i])
+            
+    # 创建统计摘要
+    if differences:
+        left_diffs = [d[0] for d in differences]
+        right_diffs = [d[1] for d in differences]
+        diffS=left_diffs+right_diffs
+        diffs=pd.DataFrame(diffS,columns=["diffs"])
+        average_diff=diffs.mean()
+        std=diffs.std()
+        #print(type(left_diffs))
+        summary = {
+            'total_peaks': len(differences),
+            'avg_left_diff': sum(left_diffs) / len(left_diffs),
+            'avg_right_diff': sum(right_diffs) / len(right_diffs),
+            'min_left_diff': min(left_diffs),
+            'max_left_diff': max(left_diffs),
+            'min_right_diff': min(right_diffs),
+            'max_right_diff': max(right_diffs)
+        }
+    else:
+        summary = {'total_peaks': 0, 'message': '未找到满足条件的峰值'}
+    
+    return {
+        'differences': differences,
+        'peak_indices': peak_indices,
+        'peak_positions': peak_positions,
+        'summary': summary,
+        'average_diff':average_diff,
+        'std':std
+    }
 
 # 使用示例
 if __name__ == "__main__":
@@ -238,6 +316,8 @@ if __name__ == "__main__":
     
     print("寻峰结果:")
     print(peaks_baseline.round(3))
-    
+    enhanced_results =calculate_peak_differences_enhanced(peaks_baseline, prominence_col=7, position_col=1)
+    print(enhanced_results['average_diff'])
+    print(enhanced_results['std'])
     
 
