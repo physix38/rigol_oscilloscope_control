@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime
 import time
 import os
+"""
+    数据单次采集
+"""
 
 def bytes_to_hex_array(data: bytes) -> list:
     """

@@ -2,7 +2,9 @@ import os
 import csv
 import shutil
 from pathlib import Path
-
+"""
+    删除csv文件中的多余空行
+"""
 def process_csv_folder_remove_empty_rows(input_folder, output_folder=None, delete_original=True):
     """
     处理文件夹中所有CSV文件，删除空行后保存到新文件夹，并可选择删除原文件
