@@ -121,7 +121,7 @@ class RigolMHO984_DataAcquisition:
             data_bytes = raw_data[data_start:data_start + data_length]
             data_bytes = bytes_to_hex_array(data_bytes)
             data_bytes =np.array(data_bytes)
-            
+            print(len(data_bytes))
             voltage_data = (data_bytes-data_bytes[0]+yor)*yinc
            
             
@@ -134,8 +134,8 @@ class RigolMHO984_DataAcquisition:
             tdiv = float(self.scope.query('TIMebase:MAIN:SCAL? '))
             delay = float(self.scope.query('TIMebase:DEL:OFFSET?'))
             sample_rate = float(self.scope.query('ACQ:SRAT?'))
-            """  width= self.scope.query('WAV:WIDT?')
-            print(width) """
+            width= self.scope.query('WAVeform:FORmat?')
+            print(width)
             
             
             
@@ -145,8 +145,10 @@ class RigolMHO984_DataAcquisition:
             
             # 计算时间轴
             num_points = len(voltage_data)
-            time_data = np.linspace(delay - 5 * tdiv, delay + 5 * tdiv, num_points)
-            
+            time_data = np.linspace(delay - 2* 5 * tdiv, delay + 2* 5 * tdiv, num_points)
+            '''4.示波器读取的数据和显示的数据不一样？有些情况下示波器上只显示了采集数据的一半。
+            因此div/s乘以5或乘以10需要按照示波器上全部显示了采集数据/只显示了采集数据的一半来决定。
+            '''
             # 获取当前时间戳
             acquisition_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             
@@ -181,6 +183,8 @@ class RigolMHO984_DataAcquisition:
             # 生成默认文件名
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f'Scope_Data_Ch{data["channel"]}_{timestamp}.csv'
+            filepath = os.path.join(save_dir, filename)
+        else:
             filepath = os.path.join(save_dir, filename)
         
         try:

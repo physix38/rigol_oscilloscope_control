@@ -4,6 +4,7 @@
 调用 dataaquisition 和 peak2 模块，自动从 Rigol 示波器读取数据，
 进行寻峰分析找到峰与调制边带，计算位置差的平均值和标准差。
 结果输出到CSV文件。
+
 """
 
 import sys
@@ -69,7 +70,7 @@ def acquire_data_and_get_files(scope_acq, save_dir='./testdata'):
     print(f"采集生成的文件: {[os.path.basename(f) for f in new_files]}")
     return new_files
 
-def process_specific_files(input_files, output_folder='./processedtestdata1'):
+def process_specific_files(input_files, output_folder='./processedtestdata3'):
     """
     处理指定的CSV文件，删除空行，保存到输出文件夹
     返回处理后的文件路径列表
@@ -93,6 +94,9 @@ def process_specific_files(input_files, output_folder='./processedtestdata1'):
             empty_rows = process_single_csv_file(input_file, output_file)
             print(f"处理 {filename}，删除了 {empty_rows} 个空行")
             processed_files.append(output_file)
+            # 删除原始文件
+            os.remove(input_file)
+            #print(f"已删除原始文件: {filename}")
             
         except Exception as e:
             print(f"处理文件 {filename} 时出错: {e}")
@@ -186,7 +190,7 @@ def main():
         if not new_files:
             print("无法获取采集的文件，退出")
             return
-        scope_acq.scope.write('RUN')
+        
         # 4. 处理这些文件（删除空行）
         processed_files = process_specific_files(new_files)
         if not processed_files:
