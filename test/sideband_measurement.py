@@ -134,13 +134,13 @@ def find_peaks_and_calculate(csv_file, small_prominence_range=(0.01, 0.08), larg
     
     avg_diff = enhanced_results.get('average_diff')
     std_diff = enhanced_results.get('std')
-    
+    summary  = enhanced_results.get('summary')
     if avg_diff is not None:
         avg_diff = avg_diff.iloc[0] if hasattr(avg_diff, 'iloc') else avg_diff
     if std_diff is not None:
         std_diff = std_diff.iloc[0] if hasattr(std_diff, 'iloc') else std_diff
     
-    return avg_diff, std_diff
+    return avg_diff, std_diff,summary
 
 def save_results_to_csv(results, output_csv):
     """
@@ -186,7 +186,7 @@ def main():
         if not new_files:
             print("无法获取采集的文件，退出")
             return
-        
+        scope_acq.scope.write('RUN')
         # 4. 处理这些文件（删除空行）
         processed_files = process_specific_files(new_files)
         if not processed_files:
@@ -202,7 +202,7 @@ def main():
         
         results = []
         for csv_file in ch1_files:
-            avg_diff, std_diff = find_peaks_and_calculate(csv_file)
+            avg_diff, std_diff,summary = find_peaks_and_calculate(csv_file)
             if avg_diff is None or std_diff is None:
                 print(f"文件 {csv_file} 无法计算位置差，跳过")
                 continue
@@ -212,7 +212,7 @@ def main():
             print("测量结果:")
             print(f"峰与调制边带位置差的平均值: {avg_diff}")
             print(f"峰与调制边带位置差的标准差: {std_diff}")
-            
+            print(f"峰与调制边带位置差的统计信息:{summary}")
             # 记录结果
             result_entry = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),

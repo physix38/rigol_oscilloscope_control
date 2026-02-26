@@ -349,8 +349,8 @@ if __name__ == "__main__":
     
     # 示例：使用小峰和大峰的突出度范围进行筛选
     # 假设小峰突出度在 0.005 到 0.02 之间，大峰突出度大于 0.03
-    small_range = (0.005, 0.02)
-    large_range = (0.03, None)
+    small_range = (0.01, 0.06)
+    large_range = (0.1, None)
     filtered_results = calculate_peak_differences_enhanced(
         peaks_baseline, 
         prominence_col=7, 
@@ -363,6 +363,7 @@ if __name__ == "__main__":
     if filtered_results['summary']['total_peaks'] > 0:
         print("平均差值:", filtered_results['average_diff'])
         print("标准差:", filtered_results['std'])
+        print("统计信息",filtered_results['summary'])
     else:
         print("未找到符合条件的峰")
     
