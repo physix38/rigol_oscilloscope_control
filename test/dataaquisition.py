@@ -145,7 +145,7 @@ class RigolMHO984_DataAcquisition:
             
             # 计算时间轴
             num_points = len(voltage_data)
-            time_data = np.linspace(delay - 2* 5 * tdiv, delay + 2* 5 * tdiv, num_points)
+            time_data = np.linspace(delay - 5 * tdiv, delay + 5 * tdiv, num_points)
             '''4.示波器读取的数据和显示的数据不一样？有些情况下示波器上只显示了采集数据的一半。
             因此div/s乘以5或乘以10需要按照示波器上全部显示了采集数据/只显示了采集数据的一半来决定。
             '''

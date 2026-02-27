@@ -12,9 +12,10 @@
 依赖：
 - dataaquisition.py (示波器采集)
 - csvprocess.py (CSV 处理)
+
 - peak2.py (寻峰)
 
-运行实例：uv run test\peak_tracking.py --interval 5 --max_displacement 5 --plot
+运行实例：uv run test\peak_tracking.py --interval 20 --max_displacement 5 --iteration 2 --plot
 """
 import sys
 import os
@@ -24,9 +25,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import argparse
+from pylab import mpl
+from matplotlib import font_manager
 
-# 添加 test 目录到路径，以便导入本地模块
-sys.path.append(os.path.join(os.path.dirname(__file__), 'test'))
+
 
 try:
     import dataaquisition
@@ -46,7 +48,7 @@ def parse_args():
                         help='每次采集之间的间隔时间（秒）(默认: 2.0)')
     parser.add_argument('--prominence_threshold', type=float, default=0.1,
                         help='峰突出度阈值，高于此值的峰才被记录 (默认: 0.1)')
-    parser.add_argument('--max_displacement', type=float, default=0.5,
+    parser.add_argument('--max_displacement', type=float, default=5,
                         help='匹配峰时允许的最大水平位移（单位同 x 轴）(默认: 0.5)')
     parser.add_argument('--output_dir', type=str, default='./peak_tracking_results',
                         help='输出结果目录 (默认: ./peak_tracking_results)')
@@ -104,7 +106,8 @@ def match_peaks(prev_peaks, curr_peaks, max_distance):
 
 def acquire_and_process(scope_acq, channel, output_dir, iteration, skip_processing=False):
     """
-    执行单次采集、保存、处理，返回 CSV 文件路径和峰 DataFrame
+    执行单次采集、保存、处理，返回 CSV 文件路径、数据、原始文件路径和处理后文件路径
+    返回: (csv_file, data, raw_path, processed_path)
     """
     # 生成文件名
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -126,13 +129,13 @@ def acquire_and_process(scope_acq, channel, output_dir, iteration, skip_processi
     data = scope_acq.acquire_channel_data(channel)
     if data is None:
         print(f"  采集失败")
-        return None, None
+        return None, None, None, None
     
     # 保存原始数据
     success = scope_acq.save_to_csv(data, save_dir=os.path.join(output_dir, 'raw'), filename=raw_filename)
     if not success:
         print(f"  保存原始数据失败")
-        return None, None
+        return None, None, None, None
     
     # 处理 CSV（删除空行）
     processed_filename = f'processed_{raw_filename}'
@@ -148,10 +151,11 @@ def acquire_and_process(scope_acq, channel, output_dir, iteration, skip_processi
             csv_file = raw_path
     else:
         csv_file = raw_path
+        processed_path = None  # 未生成处理后文件
     
-    return csv_file, data
+    return csv_file, data, raw_path, processed_path
 
-def find_peaks_above_threshold(csv_file, prominence_threshold, distance=10000):
+def find_peaks_above_threshold(csv_file, prominence_threshold, distance=1000):
     """
     寻峰并返回突出度高于阈值的峰 DataFrame
     """
@@ -205,7 +209,7 @@ def main():
             start_time = time.time()
             
             # 采集与处理
-            csv_file, data = acquire_and_process(
+            csv_file, data, raw_path, processed_path = acquire_and_process(
                 scope_acq, args.channel, args.output_dir, i, args.skip_processing
             )
             if csv_file is None:
@@ -222,6 +226,17 @@ def main():
             if not peaks_df.empty:
                 print(f"  峰位置: {peaks_df['x_position*10000'].values}")
             
+            # 删除原始和处理后的 CSV 文件以节省空间
+            try:
+                if raw_path and os.path.exists(raw_path):
+                    os.remove(raw_path)
+                    print(f"  已删除原始文件: {raw_path}")
+                if processed_path and os.path.exists(processed_path):
+                    os.remove(processed_path)
+                    print(f"  已删除处理后文件: {processed_path}")
+            except Exception as e:
+                print(f"  删除文件时出错: {e}")
+            
             all_peaks.append(peaks_df)
             
             # 匹配峰
@@ -235,7 +250,11 @@ def main():
             for prev_idx, curr_idx, dist in matches:
                 prev_pos = prev_peaks.iloc[prev_idx]['x_position*10000']
                 curr_pos = peaks_df.iloc[curr_idx]['x_position*10000']
-                displacement = curr_pos - prev_pos
+                if (curr_idx%2==0):
+                    displacement = (curr_pos - prev_pos)
+                else:
+                    displacement = (-curr_pos + prev_pos)
+                
                 displacements.append({
                     'iteration': i,
                     'prev_idx': prev_idx,
@@ -247,15 +266,26 @@ def main():
                     'prominence': peaks_df.iloc[curr_idx]['prominence']
                 })
             
+            # 计算平均位移
+            if displacements:
+                avg_displacement = np.mean([d['displacement'] for d in displacements])
+            else:
+                avg_displacement = 0.0  # 无匹配峰时位移为零
+            
             all_matches.append({
                 'iteration': i,
                 'matches': matches,
                 'new_peaks': new_peaks,
                 'lost_peaks': lost_peaks,
-                'displacements': displacements
+                'displacements': displacements,
+                'average_displacement': avg_displacement
             })
             
             prev_peaks = peaks_df
+            
+            # 实时更新累积位移图（如果启用绘图）
+            if args.plot:
+                plot_cumulative_live(args.output_dir, all_matches, acquisition_times)
             
             # 等待间隔时间
             elapsed = time.time() - start_time
@@ -270,7 +300,7 @@ def main():
         traceback.print_exc()
     finally:
         # 断开示波器连接
-        scope_acq.write('RUN')
+        
         scope_acq.disconnect()
         
         # 保存结果
@@ -278,7 +308,7 @@ def main():
         
         # 绘图
         if args.plot:
-            plot_results(args.output_dir, all_matches, all_peaks)
+            plot_results(args.output_dir, all_matches, all_peaks, acquisition_times)
     
     print("\n程序完成")
 
@@ -348,11 +378,139 @@ def save_results(output_dir, all_peaks, all_matches, acquisition_times, csv_file
     log_path = os.path.join(output_dir, 'acquisition_log.csv')
     log_df.to_csv(log_path, index=False, encoding='utf-8-sig')
     print(f"采集日志已保存到: {log_path}")
-
-def plot_results(output_dir, all_matches, all_peaks):
-    """绘制位移图表"""
-    import matplotlib.pyplot as plt
     
+    # 5. 平均位移与累积位移数据
+    import numpy as np
+    avg_data = []
+    for match_info in all_matches:
+        iteration = match_info['iteration']
+        avg_disp = match_info.get('average_displacement', 0.0)
+        avg_data.append({
+            'iteration': iteration,
+            'average_displacement': avg_disp
+        })
+    
+    if avg_data:
+        avg_df = pd.DataFrame(avg_data)
+        # 按迭代次数排序
+        avg_df = avg_df.sort_values('iteration')
+        # 计算累积位移
+        avg_df['cumulative_displacement'] = np.cumsum(avg_df['average_displacement'])
+        # 添加采集时间戳（如果可用）
+        if acquisition_times is not None:
+            # 创建迭代次数到时间的映射
+            time_map = {}
+            for i, t in enumerate(acquisition_times):
+                time_map[i+1] = t  # 迭代次数从1开始
+            avg_df['acquisition_time'] = avg_df['iteration'].map(time_map)
+        # 保存
+        avg_path = os.path.join(output_dir, 'average_displacement.csv')
+        avg_df.to_csv(avg_path, index=False, encoding='utf-8-sig')
+        print(f"平均位移数据已保存到: {avg_path}")
+    else:
+        print("无平均位移数据，跳过保存")
+
+def plot_cumulative_live(output_dir, all_matches, acquisition_times=None):
+    """
+    实时更新累积位移图（每次采集后调用）
+    参数:
+        output_dir: 输出目录
+        all_matches: 匹配信息列表（包含已进行的所有迭代）
+        acquisition_times: 采集时间戳列表（可选）
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    from pylab import mpl
+    mpl.rcParams["font.sans-serif"] = ["SimHei"]
+    plt.rcParams['axes.unicode_minus']=False #用来正常显示符号
+    # 提取每次采集的平均位移
+    avg_displacements = []
+    iterations = []
+    for match_info in all_matches:
+        avg_displacements.append(match_info.get('average_displacement', 0.0))
+        iterations.append(match_info['iteration'])
+    
+    if len(avg_displacements) == 0:
+        return  # 无数据时不绘图
+    
+    # 计算累积位移（累加和）
+    cumulative_displacements = np.cumsum(avg_displacements)
+    
+    # 确定X轴：时间或迭代次数
+    if acquisition_times is not None and len(acquisition_times) >= len(iterations):
+        from datetime import datetime
+        try:
+            times = [datetime.fromisoformat(t) for t in acquisition_times[:len(iterations)]]
+            base_time = times[0]
+            x_values = [(t - base_time).total_seconds() for t in times]
+            x_label = '时间 (秒)'
+        except Exception as e:
+            print(f"  时间戳解析失败，改用迭代次数: {e}")
+            x_values = iterations
+            x_label = '采集次数'
+    else:
+        x_values = iterations
+        x_label = '采集次数'
+    
+    # 创建双Y轴图：平均位移（柱状图）和累积位移（折线图）
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    
+    # 平均位移柱状图
+    bars = ax1.bar(x_values, avg_displacements, width=0.6, alpha=0.7, color='skyblue', edgecolor='black')
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel('平均位移量', color='blue')
+    ax1.tick_params(axis='y', labelcolor='blue')
+    ax1.set_title('平均位移与累积总位移随时间变化（实时）')
+    
+    # 在每个柱子上标注数值
+    for bar in bars:
+        height = bar.get_height()
+        if height != 0:
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.3f}', ha='center', va='bottom', fontsize=8)
+    
+    # 累积位移折线图（次Y轴）
+    ax2 = ax1.twinx()
+    ax2.plot(x_values, cumulative_displacements, 'ro-', linewidth=2, markersize=6, label='累积总位移')
+    ax2.set_ylabel('累积总位移量', color='red')
+    ax2.tick_params(axis='y', labelcolor='red')
+    ax2.legend(loc='upper left')
+    
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    plt.tight_layout()
+    cumulative_path = os.path.join(output_dir, 'cumulative_displacement_vs_time.png')
+    plt.savefig(cumulative_path, dpi=150)
+    plt.close()
+    print(f"  实时累积位移图已更新: {cumulative_path}")
+    
+    # 单独绘制累积位移折线图（可选）
+    plt.figure(figsize=(10, 5))
+    plt.plot(x_values, cumulative_displacements, 'ro-', linewidth=2, markersize=6)
+    plt.xlabel(x_label)
+    plt.ylabel('累积总位移量')
+    plt.title('累积总位移随时间变化（实时）')
+    plt.grid(True, alpha=0.3)
+    cum_only_path = os.path.join(output_dir, 'cumulative_displacement_only.png')
+    plt.savefig(cum_only_path, dpi=150)
+    plt.close()
+    print(f"  实时累积位移单独图已更新: {cum_only_path}")
+
+
+def plot_results(output_dir, all_matches, all_peaks, acquisition_times=None):
+    """绘制位移图表
+    参数:
+        output_dir: 输出目录
+        all_matches: 匹配信息列表
+        all_peaks: 峰数据列表
+        acquisition_times: 采集时间戳列表（可选）
+    """
+    import matplotlib.pyplot as plt
+    from pylab import mpl
+    # 设置显示中文字体
+    mpl.rcParams["font.sans-serif"] = ["SimHei"]
+
+    plt.rcParams['axes.unicode_minus']=False #用来正常显示符号
     # 1. 位移随时间变化折线图
     plt.figure(figsize=(12, 6))
     
@@ -418,6 +576,90 @@ def plot_results(output_dir, all_matches, all_peaks):
     plt.savefig(count_path, dpi=150)
     plt.close()
     print(f"峰数量变化图已保存到: {count_path}")
+    
+    # 4. 平均位移与累积总位移随时间变化
+    import numpy as np
+    
+    # 提取每次采集的平均位移
+    avg_displacements = []
+    iterations = []
+    for match_info in all_matches:
+        # 注意：all_matches 中可能包含第一次采集（无前次匹配），此时平均位移为0
+        avg_displacements.append(match_info.get('average_displacement', 0.0))
+        iterations.append(match_info['iteration'])
+    
+    # 确保顺序正确（按迭代次数排序）
+    if len(avg_displacements) == 0:
+        print("  无位移数据，跳过平均位移绘图")
+    else:
+        # 计算累积位移（累加和）
+        cumulative_displacements = np.cumsum(avg_displacements)
+        
+        # 确定X轴：时间或迭代次数
+        if acquisition_times is not None and len(acquisition_times) >= len(iterations):
+            # 使用采集时间戳作为X轴
+            # 将时间字符串转换为 datetime 对象，然后计算相对于第一次采集的秒数
+            from datetime import datetime
+            try:
+                times = [datetime.fromisoformat(t) for t in acquisition_times[:len(iterations)]]
+                # 计算相对于第一次采集的秒数
+                base_time = times[0]
+                x_values = [(t - base_time).total_seconds() for t in times]
+                x_label = '时间 (秒)'
+            except Exception as e:
+                print(f"  时间戳解析失败，改用迭代次数: {e}")
+                x_values = iterations
+                x_label = '采集次数'
+        else:
+            x_values = iterations
+            x_label = '采集次数'
+        
+        # 创建双Y轴图：平均位移（柱状图）和累积位移（折线图）
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+        
+        # 平均位移柱状图
+        bars = ax1.bar(x_values, avg_displacements, width=0.6, alpha=0.7, color='skyblue', edgecolor='black')
+        ax1.set_xlabel(x_label)
+        ax1.set_ylabel('平均位移量', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        ax1.set_title('平均位移与累积总位移随时间变化')
+        
+        # 在每个柱子上标注数值
+        for bar in bars:
+            height = bar.get_height()
+            if height != 0:
+                ax1.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.3f}', ha='center', va='bottom', fontsize=8)
+        
+        # 累积位移折线图（次Y轴）
+        ax2 = ax1.twinx()
+        ax2.plot(x_values, cumulative_displacements, 'ro-', linewidth=2, markersize=6, label='累积总位移')
+        ax2.set_ylabel('累积总位移量', color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+        
+        # 添加图例
+        ax2.legend(loc='upper left')
+        
+        # 网格
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        
+        plt.tight_layout()
+        cumulative_path = os.path.join(output_dir, 'cumulative_displacement_vs_time.png')
+        plt.savefig(cumulative_path, dpi=150)
+        plt.close()
+        print(f"累积总位移图已保存到: {cumulative_path}")
+        
+        # 单独绘制累积位移折线图（可选）
+        plt.figure(figsize=(10, 5))
+        plt.plot(x_values, cumulative_displacements, 'ro-', linewidth=2, markersize=6)
+        plt.xlabel(x_label)
+        plt.ylabel('累积总位移量')
+        plt.title('累积总位移随时间变化')
+        plt.grid(True, alpha=0.3)
+        cum_only_path = os.path.join(output_dir, 'cumulative_displacement_only.png')
+        plt.savefig(cum_only_path, dpi=150)
+        plt.close()
+        print(f"累积总位移单独图已保存到: {cum_only_path}")
 
 if __name__ == '__main__':
     main()

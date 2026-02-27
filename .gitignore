@@ -12,5 +12,6 @@ topticafile
 processedtestdata1
 processedtestdata0
 processedtestdata3
+peak_tracking_results
 # Virtual environments
 .venv
